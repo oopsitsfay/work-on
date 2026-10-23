@@ -379,13 +379,13 @@
 <section id="minting" class="tone">
   <div class="wrap">
     <div class="sec-head">
-      <div><div class="label"><b>02</b> Minting</div><h2>Three steps,<br>one flat price.</h2></div>
+      <div><div class="label"><b>02</b> Minting</div><h2>Run. Found.<br>Mint.</h2></div>
       <p>Every mint costs the same. The work you put in decides whether you can mint and how rare the result is. It never changes the price.</p>
     </div>
     <div class="steps">
-      <div class="step panel"><div class="n">01 <span>Search</span></div><h3>Find a hash</h3><p>Your browser tries nonces until <code>keccak256(contract, wallet, nonce)</code> starts with the required zero bits. On a laptop that takes about a second at the start of the mint.</p></div>
-      <div class="step panel"><div class="n">02 <span>Mint</span></div><h3>Send it</h3><p>Submit the nonce with exactly <b>0.000315 ETH</b>. Gas is paid at the network rate when you mint. The contract rejects any other amount.</p></div>
-      <div class="step panel"><div class="n">03 <span>Own</span></div><h3>Get the print</h3><p>The contract verifies the hash, saves it as the token's seed and mints the ERC-721 to you. Up to 2 per wallet.</p></div>
+      <div class="step panel"><div class="n">01 <span>Run</span></div><h3>Start a run</h3><p>Your browser mines nonces until <code>keccak256(contract, wallet, nonce)</code> starts with the run's required zero bits. Free, nothing on-chain. At the start of the mint that takes about a second on a laptop.</p></div>
+      <div class="step panel"><div class="n">02 <span>Found</span></div><h3>Find a hash</h3><p>When a hash meets the target, the miner stops and shows the print it draws. Keep it, or run again for more zero bits and a rarer finish.</p></div>
+      <div class="step panel"><div class="n">03 <span>Mint</span></div><h3>Mint it</h3><p>Send the nonce with exactly <b>0.000315 ETH</b> plus gas. The contract checks the hash, saves it as the seed and mints the print to you. Up to 2 per wallet.</p></div>
     </div>
 
     <div class="cols-2 block">

@@ -17,16 +17,18 @@
   let artifact, address, chainId, chain, reader, readContract;
   let browser, signer, account, walletChain, wallet1193;
   let status = null;
-  let minting = false;
+  let minting = false; // true while running the miner or sending the mint
   let worker = null;
+  let phase = 'idle'; // idle → run → found → mint → done
+  let found = null; // { nonce, hash, bits, difficulty }
+  let rate = 150000; // hashes per second; replaced by the measured rate once the miner runs
 
   // ------------------------------------------------------------ ui helpers
   const say = (text, isErr = false) => { $('msg').textContent = text; $('msg').className = isErr ? 'msg err' : 'msg'; };
   const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
   const txLink = (h) => (chain.explorer ? `<a href="${chain.explorer}/tx/${h}" target="_blank" rel="noopener">${short(h)}</a>` : short(h));
 
-  function paint(art) {
-    const c = $('canvas');
+  function paint(art, c = $('canvas')) {
     c.width = c.height = art.size;
     const ctx = c.getContext('2d');
     art.grid.forEach((row, y) => row.forEach((v, x) => { ctx.fillStyle = art.palette[v]; ctx.fillRect(x, y, 1, 1); }));
@@ -65,7 +67,7 @@
       c.openedAt(), c.totalSupply(), c.MAX_SUPPLY(), c.pressed(), c.RUN_SIZE(), c.RUNS(), c.difficulty(), c.price(),
     ]);
     const mine = account ? await c.pressedBy(account) : 0n;
-    return { live: openedAt > 0n, total, max, pressed, publicMax: runSize * runs, difficulty, price, mine };
+    return { live: openedAt > 0n, total, max, pressed, publicMax: runSize * runs, runSize, runs, difficulty, price, mine };
   }
 
   function render() {
@@ -80,6 +82,10 @@
     $('fMinted').textContent = `${s.total.toLocaleString()} / ${s.max.toLocaleString()}`;
     $('bar').style.width = `${Number((s.total * 1000n) / (s.max || 1n)) / 10}%`;
     $('fDiff').textContent = `${s.difficulty} zero bits`;
+    const run = Math.min(Number(s.runs) - 1, Math.floor(Number(s.pressed) / Number(s.runSize)));
+    const left = Number(s.runSize) * (run + 1) - Number(s.pressed);
+    $('fRun').textContent = `${run + 1} of ${s.runs} · ${left} left`;
+    estimates(Number(s.difficulty));
     $('fWallet').textContent = account ? `${s.mine} / 2 minted` : '2 max';
     const soldOut = s.pressed >= s.publicMax;
     if (!s.live) {
@@ -97,7 +103,7 @@
       $('mintBox').classList.remove('hidden');
       $('connectBtn').classList.toggle('hidden', !!account);
       $('mintControls').classList.toggle('hidden', !account);
-      $('mintBtn').disabled = minting || s.mine >= 2n;
+      $('runBtn').disabled = phase !== 'idle' || s.mine >= 2n;
       const justMinted = !$('result').classList.contains('hidden');
       if (account && s.mine >= 2n && !minting && !justMinted) say('This wallet has minted the maximum of 2.');
     }
@@ -148,41 +154,128 @@
     }
   }
 
-  // ------------------------------------------------------------ mint
+  // ------------------------------------------------------------ run → found → mint
+  const fmtN = (n) => Math.round(n).toLocaleString('en-US');
+  const fmtT = (sec) => (sec < 1 ? `${sec.toFixed(1)} s` : sec < 90 ? `${Math.round(sec)} s` : sec < 5400 ? `${Math.round(sec / 60)} min` : `${(sec / 3600).toFixed(1)} h`);
+  const small = () => window.matchMedia('(max-width: 860px)').matches; // print and miner sit below the controls
+  const finishOf = (extra) => (extra >= 8 ? 'Holo Foil' : extra >= 4 ? 'Gold Leaf' : 'Common');
+
+  function setPhase(p) {
+    phase = p;
+    $('stages').dataset.phase = p;
+    $('runControls').classList.toggle('hidden', p !== 'idle');
+    $('runningControls').classList.toggle('hidden', p !== 'run');
+    $('foundBox').classList.toggle('hidden', !(p === 'found' || p === 'mint'));
+    $('mintFoundBtn').disabled = p === 'mint';
+    $('discardBtn').disabled = p === 'mint';
+    $('cState').textContent = { idle: 'idle', run: 'running', found: 'found', mint: 'minting', done: 'minted' }[p];
+    $('console').dataset.phase = p;
+  }
+
+  // Expected time per target on this device.
+  function estimates(difficulty) {
+    const opts = { 0: 'Common · first valid hash', 4: 'Gold Leaf · +4 bits', 8: 'Holo Foil · +8 bits' };
+    for (const o of $('aim').options) {
+      const aim = Number(o.value);
+      o.textContent = `${opts[aim]} · ~${fmtT(2 ** (difficulty + aim) / rate)}`;
+    }
+  }
+
+  function drawHash(hex, zeros) {
+    const z = Math.floor(zeros / 4);
+    $('cBest').innerHTML = `<b>${hex.slice(0, z)}</b>${hex.slice(z, 40)}…`;
+  }
+  function drawMeter(bits, target) {
+    const m = $('cMeter');
+    if (m.children.length !== target) m.innerHTML = '<i></i>'.repeat(target);
+    [...m.children].forEach((c, i) => c.classList.toggle('on', i < bits));
+    $('cBits').textContent = `${Math.min(bits, target)} / ${target} bits`;
+  }
+
   function search(difficulty, aim) {
     return new Promise((resolve) => {
       worker = new Worker('grind-worker.js');
-      $('stopBtn').disabled = false;
+      const t0 = performance.now();
+      const startNonce = crypto.getRandomValues(new Uint32Array(1))[0];
+      const target = difficulty + aim;
+      drawMeter(0, target);
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
+          rate = e.data.rate || rate;
           paint(HP.render(e.data.sample, 0));
-          say(`Searching… ${Math.round(e.data.rate).toLocaleString()} hashes/s · best so far ${e.data.best.bits} of ${difficulty + aim} bits`);
+          $('cRate').textContent = e.data.rate >= 1e6 ? `${(e.data.rate / 1e6).toFixed(1)}M H/s` : `${Math.round(e.data.rate / 1000)}k H/s`;
+          $('cTried').textContent = fmtN(e.data.nonce - startNonce);
+          $('cTime').textContent = fmtT((performance.now() - t0) / 1000);
+          if (e.data.best.hash) drawHash(e.data.best.hash.replace(/^0x/, ''), e.data.best.bits);
+          drawMeter(e.data.best.bits, target);
         } else {
           worker.terminate();
           worker = null;
-          $('stopBtn').disabled = true;
-          resolve(e.data.result);
+          const r = e.data.result;
+          if (r) {
+            $('cTried').textContent = fmtN(r.nonce - startNonce + 1);
+            $('cTime').textContent = fmtT(e.data.seconds);
+            drawHash(r.hash.replace(/^0x/, ''), r.bits);
+            drawMeter(r.bits, target);
+          }
+          resolve(r);
         }
       };
-      worker.onerror = () => { worker = null; $('stopBtn').disabled = true; resolve(null); };
-      const startNonce = crypto.getRandomValues(new Uint32Array(1))[0];
+      worker.onerror = () => { worker = null; resolve(null); };
       worker.postMessage({ type: 'start', params: { contract: address, minter: account, difficulty, aim, startNonce } });
     });
   }
 
-  async function mint() {
-    if (minting) return;
+  // 01 RUN: grind nonces in the browser. Free, nothing on-chain.
+  async function run() {
+    if (phase !== 'idle') return;
     minting = true;
-    $('mintBtn').disabled = true;
+    found = null;
     $('result').classList.add('hidden');
+    setPhase('run');
     try {
       status = await readStatus();
       if (!status.live) throw new Error("Minting isn't live yet.");
       if (status.mine >= 2n) throw new Error('This wallet has already minted the maximum of 2.');
       const difficulty = Number(status.difficulty);
-      const found = await search(difficulty, Number($('aim').value));
-      if (!found) { say('Search stopped.'); return; }
-      say(`Found a ${found.bits}-bit hash. Confirm the mint in your wallet: ${ethers.formatEther(status.price)} ETH + gas.`);
+      say(`Running at ${difficulty} bits…`);
+      if (small()) $('console').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const r = await search(difficulty, Number($('aim').value));
+      if (!r) { say('Run stopped.'); setPhase('idle'); return; }
+      // 02 FOUND
+      found = { ...r, difficulty };
+      const art = HP.render(r.hash, difficulty);
+      paint(art);
+      paint(art, $('foundArt'));
+      const extra = r.bits - difficulty;
+      $('foundNonce').textContent = fmtN(r.nonce);
+      $('foundBits').textContent = `${r.bits} bits (+${extra})`;
+      const fin = finishOf(extra);
+      $('foundFinish').innerHTML = `<span class="pill ${fin === 'Holo Foil' ? 'holo' : fin === 'Gold Leaf' ? 'gold' : ''}"><i></i>${fin}</span>`;
+      $('foundTraits').textContent = `${art.traits.Edition} · ${art.traits.Style} · ${art.traits.Inks}`;
+      $('mintPrice').textContent = `${ethers.formatEther(status.price)} ETH + gas`;
+      setPhase('found');
+      say('Valid hash found. Mint it to put this print on-chain.');
+      if (small()) $('foundBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (e) {
+      say(errMsg(e), true);
+      setPhase('idle');
+    } finally {
+      minting = phase === 'run';
+      if (phase === 'idle') await refresh();
+    }
+  }
+
+  // 03 MINT: send the found nonce to the contract.
+  async function mintFound() {
+    if (phase !== 'found' || !found) return;
+    minting = true;
+    setPhase('mint');
+    try {
+      status = await readStatus();
+      if (!status.live) throw new Error("Minting isn't live yet.");
+      if (Number(status.difficulty) > found.bits) throw new Error(`The run moved to ${status.difficulty} bits and this hash has ${found.bits}. Run again.`);
+      say(`Confirm the mint in your wallet: ${ethers.formatEther(status.price)} ETH + gas.`);
       const c = new ethers.Contract(address, artifact.abi, signer);
       // Handed straight to the wallet; the wallet decides gas.
       const req = await c.press.populateTransaction(found.nonce, { value: status.price });
@@ -194,6 +287,7 @@
       if (!receipt || receipt.status !== 1) throw new Error('The mint transaction failed on-chain.');
       const ev = receipt.logs.map((l) => { try { return c.interface.parseLog(l); } catch { return null; } }).find((x) => x && x.name === 'Pressed');
       const id = ev.args.tokenId;
+      const difficulty = Number(ev.args.difficulty ?? found.difficulty);
       const art = HP.render(ev.args.seed, difficulty);
       paint(art);
       const page = `print.html?${key === 'test' ? 'c=test&' : ''}id=${id}&seed=${ev.args.seed}&d=${difficulty}`;
@@ -206,23 +300,40 @@
         ['Page', `<a href="${page}" target="_blank" rel="noopener">View print</a> · <a href="collection.html?${key === 'test' ? 'c=test&' : ''}owner=${account}">Your prints</a>`],
       ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
       $('result').classList.remove('hidden');
+      found = null;
+      setPhase('done');
+      try { status = await readStatus(); render(); } catch {}
       say(`Minted ${shape.name} #${id}.`);
+      setTimeout(() => { if (phase === 'done') setPhase('idle'); refresh(); }, 4000);
     } catch (e) {
       say(errMsg(e), true);
+      setPhase(found ? 'found' : 'idle');
     } finally {
       minting = false;
       await refresh();
     }
   }
 
+  function discard() {
+    if (phase !== 'found') return;
+    found = null;
+    setPhase('idle');
+    say('Hash discarded. Run again when you are ready.');
+    refresh();
+  }
+
   // ------------------------------------------------------------ boot
   async function boot() {
-    $('title').textContent = `Mint ${shape.name}`;
-    document.title = `Mint ${shape.name}`;
+    $('title').textContent = 'Mine a print';
+    document.title = `Mine a print · ${shape.name}`;
     paint(HP.render('0000' + '8'.repeat(4) + HP.toHex(HP.keccak256(new TextEncoder().encode(key))).slice(8), 16));
     $('connectBtn').onclick = connect;
-    $('mintBtn').onclick = mint;
+    $('runBtn').onclick = run;
     $('stopBtn').onclick = () => worker && worker.postMessage({ type: 'stop' });
+    $('mintFoundBtn').onclick = mintFound;
+    $('discardBtn').onclick = discard;
+    setPhase('idle');
+    estimates(16);
 
     const [config, art] = await Promise.all([
       fetch('mint-config.json', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
