@@ -26,8 +26,36 @@
         {
           "key": "Cross-Origin-Opener-Policy",
           "value": "same-origin-allow-popups"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "hashprints.vercel.app"
+        }
+      ],
+      "destination": "/soon.html",
+      "permanent": false
+    },
+    {
+      "source": "/:path((?!api/meta/|api/test/meta/|api/image|soon\\.html$|icon\\.png$|robots\\.txt$).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "hashprints.vercel.app"
+        }
+      ],
+      "destination": "/soon.html",
+      "permanent": false
     }
   ]
 }
