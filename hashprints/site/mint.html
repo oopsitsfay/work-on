@@ -157,6 +157,29 @@
   .found-body dl { margin: 0; }
   .found-art { width: 112px; height: 112px; image-rendering: pixelated; border: 1px solid var(--line-2); background: var(--bg); }
   @media (max-width: 520px) { .found-body { grid-template-columns: 84px minmax(0, 1fr); gap: 12px; } .found-art { width: 84px; height: 84px; } .found dl { font-size: 12px; } }
+
+  /* target picker */
+  .t-label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 0 10px; }
+  .t-label span { font: 500 11px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+  .t-label em { font: 12px "Space Grotesk", sans-serif; color: var(--muted); font-style: normal; text-align: right; }
+  .targets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .targets button { all: unset; box-sizing: border-box; cursor: pointer; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface); padding: 11px 13px; transition: border-color .15s, background .15s; }
+  .targets button:hover, .targets button:hover:not(:disabled) { background: var(--surface); color: var(--text); border-color: var(--text-2); }
+  .targets button b { display: block; font: 700 14px "Space Grotesk", sans-serif; }
+  .targets button span { display: block; font: 12px "JetBrains Mono", monospace; color: var(--muted); margin-top: 2px; }
+  .targets button[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .targets button.gold[aria-checked="true"] { border-color: var(--gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 18%, transparent); }
+  .targets button.holo[aria-checked="true"] { border-color: var(--holo); box-shadow: 0 0 0 3px color-mix(in srgb, var(--holo) 18%, transparent); }
+  .targets button.gold b { color: var(--gold); } .targets button.holo b { color: var(--holo); }
+  .targets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 520px) { .t-label em { display: none; } }
+  /* miner log */
+  .c-log { margin-top: 14px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); font: 12px/1.75 "JetBrains Mono", monospace; color: var(--text-2); height: 118px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  .c-log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .55; }
+  .c-log div:last-child { opacity: 1; color: var(--text); }
+  .c-log i { font-style: normal; color: var(--accent-fg); margin-right: 6px; }
+  .c-log .ok { color: var(--accent-fg); }
+  .c-log .bad { color: var(--bad); }
 </style>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HashPrints">
@@ -205,12 +228,13 @@
           <button id="connectBtn" type="button">Connect wallet</button>
           <div id="mintControls" class="hidden">
             <div id="runControls">
-              <label for="aim">Run until</label>
-              <select id="aim">
-                <option value="0">Common · first valid hash</option>
-                <option value="4">Gold Leaf · +4 bits</option>
-                <option value="8">Holo Foil · +8 bits</option>
-              </select>
+              <div class="t-label"><span>Target</span><em>Common is the fastest. Mine longer for a rarer finish.</em></div>
+              <div class="targets" id="targets" role="radiogroup" aria-label="Target">
+                <button type="button" role="radio" data-aim="0" aria-checked="true"><b>Common</b><span id="est0">~0.4 s</span></button>
+                <button type="button" role="radio" data-aim="4" aria-checked="false" class="gold"><b>Gold Leaf</b><span id="est4">~7 s</span></button>
+                <button type="button" role="radio" data-aim="8" aria-checked="false" class="holo"><b>Holo Foil</b><span id="est8">~2 min</span></button>
+              </div>
+              <select id="aim" hidden aria-hidden="true"><option value="0" selected>0</option><option value="4">4</option><option value="8">8</option></select>
               <div class="row"><button id="runBtn" type="button">Start run</button></div>
             </div>
             <div id="runningControls" class="hidden">
@@ -250,6 +274,7 @@
           <div class="c-label">Best hash · keccak256(contract, wallet, nonce)</div>
           <div class="c-hash" id="cBest">–</div>
           <div class="c-meter"><div id="cMeter"></div><span id="cBits">0 / 16 bits</span></div>
+          <div class="c-log" id="cLog" aria-live="polite"><div><i>&gt;</i> miner ready · waiting for a run</div></div>
         </div>
         <div class="result hidden" id="result"><table id="resultTable"></table></div>
       </div>

@@ -86,6 +86,7 @@
     const left = Number(s.runSize) * (run + 1) - Number(s.pressed);
     $('fRun').textContent = `${run + 1} of ${s.runs} · ${left} left`;
     estimates(Number(s.difficulty));
+    if (phase === 'idle') drawMeter(0, Number(s.difficulty));
     $('fWallet').textContent = account ? `${s.mine} / 2 minted` : '2 max';
     const soldOut = s.pressed >= s.publicMax;
     if (!s.live) {
@@ -142,6 +143,7 @@
     account = w.address;
     walletChain = w.chainId;
     say(`Connected ${short(account)}`);
+    log(`wallet ${short(account)} connected`);
     await refresh();
   }
 
@@ -174,12 +176,22 @@
 
   // Expected time per target on this device.
   function estimates(difficulty) {
-    const opts = { 0: 'Common · first valid hash', 4: 'Gold Leaf · +4 bits', 8: 'Holo Foil · +8 bits' };
-    for (const o of $('aim').options) {
-      const aim = Number(o.value);
-      o.textContent = `${opts[aim]} · ~${fmtT(2 ** (difficulty + aim) / rate)}`;
-    }
+    for (const aim of [0, 4, 8]) $(`est${aim}`).textContent = `~${fmtT(2 ** (difficulty + aim) / rate)}`;
   }
+
+  // Terminal-style log under the miner: the last few events, newest at the bottom.
+  function log(text, kind = '') {
+    const box = $('cLog');
+    const line = document.createElement('div');
+    line.innerHTML = '<i>&gt;</i>';
+    const t = document.createElement('span');
+    t.textContent = text;
+    if (kind) t.className = kind;
+    line.appendChild(t);
+    box.appendChild(line);
+    while (box.children.length > 6) box.firstChild.remove();
+  }
+  const shortHash = (h) => `0x${h.replace(/^0x/, '').slice(0, 12)}…`;
 
   function drawHash(hex, zeros) {
     const z = Math.floor(zeros / 4);
@@ -198,6 +210,7 @@
       const t0 = performance.now();
       const startNonce = crypto.getRandomValues(new Uint32Array(1))[0];
       const target = difficulty + aim;
+      let lastBest = -1;
       drawMeter(0, target);
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
@@ -207,6 +220,10 @@
           $('cTried').textContent = fmtN(e.data.nonce - startNonce);
           $('cTime').textContent = fmtT((performance.now() - t0) / 1000);
           if (e.data.best.hash) drawHash(e.data.best.hash.replace(/^0x/, ''), e.data.best.bits);
+          if (e.data.best.bits > lastBest && e.data.best.hash) {
+            lastBest = e.data.best.bits;
+            log(`best ${lastBest} bits · ${shortHash(e.data.best.hash)}`);
+          }
           drawMeter(e.data.best.bits, target);
         } else {
           worker.terminate();
@@ -239,9 +256,10 @@
       if (status.mine >= 2n) throw new Error('This wallet has already minted the maximum of 2.');
       const difficulty = Number(status.difficulty);
       say(`Running at ${difficulty} bits…`);
+      log(`run · target ${difficulty + Number($('aim').value)} bits (run requires ${difficulty})`);
       if (small()) $('console').scrollIntoView({ behavior: 'smooth', block: 'center' });
       const r = await search(difficulty, Number($('aim').value));
-      if (!r) { say('Run stopped.'); setPhase('idle'); return; }
+      if (!r) { say('Run stopped.'); log('run stopped'); setPhase('idle'); return; }
       // 02 FOUND
       found = { ...r, difficulty };
       const art = HP.render(r.hash, difficulty);
@@ -255,10 +273,12 @@
       $('foundTraits').textContent = `${art.traits.Edition} · ${art.traits.Style} · ${art.traits.Inks}`;
       $('mintPrice').textContent = `${ethers.formatEther(status.price)} ETH + gas`;
       setPhase('found');
+      log(`found · ${r.bits} bits · ${fin}`, 'ok');
       say('Valid hash found. Mint it to put this print on-chain.');
       if (small()) $('foundBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (e) {
       say(errMsg(e), true);
+      log(errMsg(e), 'bad');
       setPhase('idle');
     } finally {
       minting = phase === 'run';
@@ -276,6 +296,7 @@
       if (!status.live) throw new Error("Minting isn't live yet.");
       if (Number(status.difficulty) > found.bits) throw new Error(`The run moved to ${status.difficulty} bits and this hash has ${found.bits}. Run again.`);
       say(`Confirm the mint in your wallet: ${ethers.formatEther(status.price)} ETH + gas.`);
+      log('mint · waiting for wallet confirmation');
       const c = new ethers.Contract(address, artifact.abi, signer);
       // Handed straight to the wallet; the wallet decides gas.
       const req = await c.press.populateTransaction(found.nonce, { value: status.price });
@@ -283,6 +304,7 @@
         from: account, to: address, data: req.data, value: ethers.toQuantity(status.price),
       }] });
       say('Transaction sent. Waiting for confirmation…');
+      log(`tx ${shortHash(hash)} sent`);
       const receipt = await browser.waitForTransaction(hash);
       if (!receipt || receipt.status !== 1) throw new Error('The mint transaction failed on-chain.');
       const ev = receipt.logs.map((l) => { try { return c.interface.parseLog(l); } catch { return null; } }).find((x) => x && x.name === 'Pressed');
@@ -303,10 +325,12 @@
       found = null;
       setPhase('done');
       try { status = await readStatus(); render(); } catch {}
+      log(`minted · ${shape.name} #${id}`, 'ok');
       say(`Minted ${shape.name} #${id}.`);
       setTimeout(() => { if (phase === 'done') setPhase('idle'); refresh(); }, 4000);
     } catch (e) {
       say(errMsg(e), true);
+      log(errMsg(e), 'bad');
       setPhase(found ? 'found' : 'idle');
     } finally {
       minting = false;
@@ -319,6 +343,7 @@
     found = null;
     setPhase('idle');
     say('Hash discarded. Run again when you are ready.');
+    log('hash discarded');
     refresh();
   }
 
@@ -332,8 +357,16 @@
     $('stopBtn').onclick = () => worker && worker.postMessage({ type: 'stop' });
     $('mintFoundBtn').onclick = mintFound;
     $('discardBtn').onclick = discard;
+    for (const b of $('targets').querySelectorAll('button')) {
+      b.onclick = () => {
+        if (phase !== 'idle') return;
+        $('aim').value = b.dataset.aim;
+        for (const o of $('targets').querySelectorAll('button')) o.setAttribute('aria-checked', String(o === b));
+      };
+    }
     setPhase('idle');
     estimates(16);
+    drawMeter(0, 16);
 
     const [config, art] = await Promise.all([
       fetch('mint-config.json', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
