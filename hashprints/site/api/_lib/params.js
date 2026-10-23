@@ -30,7 +30,7 @@ function metadata(req, res, c) {
   const ap = id <= c.artistProofs;
   const body = {
     name: ap ? `${c.name} A/P ${id}` : `${c.name} #${id}`,
-    description: 'A 32x32 pixel print generated from the proof-of-work hash its minter found. https://hashprints.vercel.app · X: @hashprintsnft',
+    description: 'A 32x32 pixel print generated from the proof-of-work hash its minter found. https://hpsmine.vercel.app · X: @hashprintsnft',
     image: `${origin}/api/image?${qs}`,
     external_url: `${origin}/print.html?${c === HP.COLLECTIONS.test ? 'c=test&' : ''}id=${id}&${qs}`,
     background_color: p.art.palette[0].slice(1),

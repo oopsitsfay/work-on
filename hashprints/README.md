@@ -4,7 +4,7 @@
 
 **Status:** tested and internally reviewed (see [SECURITY.md](SECURITY.md)), **not deployed and not professionally audited**. The website runs the mint as a simulation.
 
-Live site: https://hashprints.vercel.app · X: [@hashprintsnft](https://x.com/hashprintsnft)
+Live site: https://hpsmine.vercel.app (the old address, hashprints.vercel.app, still works and serves the on-chain metadata) · X: [@hashprintsnft](https://x.com/hashprintsnft)
 
 ## Mint
 
